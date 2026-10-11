@@ -8,8 +8,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -28,21 +26,19 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.foundation.Canvas
 import com.xen.xenmind.data.Prefs
 import com.xen.xenmind.service.OverlayService
 import com.xen.xenmind.service.ScreenCaptureService
 
-private val P1 = Color(0xFF0A0614)   // deepest
-private val P2 = Color(0xFF150A26)   // bg
-private val P3 = Color(0xFF1E1035)   // surface
-private val Neon = Color(0xFFD946EF) // glow
+private val P1 = Color(0xFF0A0614)
+private val P2 = Color(0xFF150A26)
+private val P3 = Color(0xFF1E1035)
+private val Neon = Color(0xFFD946EF)
 private val Violet = Color(0xFFA855F7)
 private val VioletDeep = Color(0xFF7C3AED)
 private val TxtLight = Color(0xFFF0E6FF)
@@ -63,6 +59,7 @@ class MainActivity : ComponentActivity() {
         var hasOverlay by remember { mutableStateOf(Settings.canDrawOverlays(ctx)) }
         var captureGranted by remember { mutableStateOf(false) }
         var apiKey by remember { mutableStateOf(prefs.apiKey) }
+        var chain by remember { mutableStateOf(prefs.modelChain.joinToString(", ")) }
         var status by remember { mutableStateOf("") }
         var statusGood by remember { mutableStateOf(true) }
 
@@ -81,279 +78,171 @@ class MainActivity : ComponentActivity() {
                 }
                 ctx.startForegroundService(i)
                 captureGranted = true
-                status = "Screen capture siap"
-                statusGood = true
+                status = "Screen capture siap"; statusGood = true
             } else {
                 captureGranted = false
-                status = "Capture dibatalkan"
-                statusGood = false
+                status = "Capture dibatalkan"; statusGood = false
             }
         }
 
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(P2, P1),
-                        center = Offset(0f, 0f),
-                        radius = 1600f
-                    )
-                )
+                .background(Brush.radialGradient(listOf(P2, P1), Offset(0f, 0f), 1600f))
         ) {
-            // ambient glow top
             Box(
                 modifier = Modifier
-                    .size(300.dp)
+                    .size(280.dp)
                     .offset(x = (-80).dp, y = (-100).dp)
-                    .blur(140.dp)
+                    .blur(150.dp)
                     .background(Neon.copy(alpha = 0.25f), CircleShape)
             )
-            Box(
-                modifier = Modifier
-                    .size(260.dp)
-                    .offset(x = 200.dp, y = 500.dp)
-                    .blur(140.dp)
-                    .background(VioletDeep.copy(alpha = 0.28f), CircleShape)
-            )
-
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .padding(22.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Spacer(Modifier.height(10.dp))
-
-                // ─────── HEADER ───────
+                Spacer(Modifier.height(20.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    RobotMark(size = 44.dp)
-                    Spacer(Modifier.width(12.dp))
+                    RobotMark(size = 52.dp)
+                    Spacer(Modifier.width(14.dp))
                     Column {
                         Text(
                             "XENMIND",
                             color = TxtLight,
-                            fontSize = 24.sp,
+                            fontSize = 26.sp,
                             fontWeight = FontWeight.Black,
                             letterSpacing = 2.sp,
                             style = LocalTextStyle.current.copy(
-                                shadow = Shadow(Neon, Offset.Zero, 24f)
+                                shadow = Shadow(Neon, Offset.Zero, 28f)
                             )
                         )
                         Text(
-                            "AI OVERLAY ASSISTANT",
-                            color = Neon,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                            letterSpacing = 3.sp
+                            "AI OVERLAY · UNIVERSAL",
+                            color = Neon, fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold, letterSpacing = 3.sp
                         )
                     }
                 }
-
-                Spacer(Modifier.height(4.dp))
                 Text(
-                    "Overlay pintar buat bantu jawab soal di layar. Aktifkan izin, tap MULAI, dan bubble robot akan muncul.",
-                    color = TxtDim,
-                    fontSize = 12.sp,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 18.sp,
+                    "AI baca soal di layar, jawab otomatis, scroll sendiri sampai habis. Support pilihan ganda & essay.",
+                    color = TxtDim, fontSize = 12.sp,
+                    textAlign = TextAlign.Center, lineHeight = 18.sp,
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // ─────── CARD 1: API ───────
                 GlassCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        NeonDot()
-                        Spacer(Modifier.width(10.dp))
-                        Text("API CONFIG", color = Neon, fontSize = 11.sp,
-                            fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-                    }
-                    Spacer(Modifier.height(14.dp))
-
-                    LabeledField(
-                        label = "XYRUS API KEY",
-                        value = apiKey,
-                        placeholder = "xyrz-xxxxx...",
-                        onValueChange = { apiKey = it; prefs.apiKey = it },
-                        isSecret = true
-                    )
+                    CardTitle("API CONFIG")
                     Spacer(Modifier.height(12.dp))
-
-                    val chainStr = prefs.modelChain.joinToString(", ")
-                    LabeledField(
-                        label = "MODEL CHAIN",
-                        value = chainStr,
-                        placeholder = "xyrz/gpt-5.6-luna, ...",
-                        onValueChange = {
-                            prefs.modelChain = it.split(",").map { s -> s.trim() }.filter { s -> s.isNotEmpty() }
-                        },
-                        isSecret = false
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Model akan dicoba berurutan kalau salah satu error.",
-                        color = TxtDim, fontSize = 10.sp, lineHeight = 14.sp
-                    )
+                    Field("XYRUS API KEY", apiKey, "xyrz-xxxxx...") {
+                        apiKey = it; prefs.apiKey = it
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Field("MODEL CHAIN", chain, "xyrz/gpt-5.6-luna, ...") {
+                        chain = it
+                        prefs.modelChain = it.split(",").map { s -> s.trim() }.filter { s -> s.isNotEmpty() }
+                    }
                 }
 
-                // ─────── CARD 2: PERMISSION ───────
                 GlassCard {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        NeonDot()
-                        Spacer(Modifier.width(10.dp))
-                        Text("PERMISSIONS", color = Neon, fontSize = 11.sp,
-                            fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+                    CardTitle("PERMISSIONS")
+                    Spacer(Modifier.height(12.dp))
+                    PermRow("Overlay", "Bubble ngambang di atas app lain", hasOverlay) {
+                        overlayPerm.launch(Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:${ctx.packageName}")
+                        ))
                     }
-                    Spacer(Modifier.height(14.dp))
-
-                    PermissionRow(
-                        label = "Overlay",
-                        desc = "Biar bubble muncul di atas app lain",
-                        granted = hasOverlay
-                    ) {
-                        overlayPerm.launch(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                            Uri.parse("package:${ctx.packageName}")))
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    PermissionRow(
-                        label = "Screen Capture",
-                        desc = "Biar bisa baca soal di layar",
-                        granted = captureGranted
-                    ) {
-                        val mpm = ctx.getSystemService(android.media.projection.MediaProjectionManager::class.java)
+                    Spacer(Modifier.height(8.dp))
+                    PermRow("Screen Capture", "Baca soal di layar", captureGranted) {
+                        val mpm = ctx.getSystemService(
+                            android.media.projection.MediaProjectionManager::class.java
+                        )
                         capturePerm.launch(mpm.createScreenCaptureIntent())
                     }
                 }
 
-                // ─────── CTA ───────
-                Spacer(Modifier.height(4.dp))
-
                 val ready = hasOverlay && captureGranted && apiKey.isNotBlank()
 
-                NeonButton(
-                    text = "MULAI OVERLAY",
-                    enabled = ready,
-                    onClick = {
-                        if (!Settings.canDrawOverlays(ctx)) {
-                            status = "Izinkan overlay dulu"; statusGood = false; return@NeonButton
-                        }
-                        if (!captureGranted) {
-                            status = "Izinkan screen capture dulu"; statusGood = false; return@NeonButton
-                        }
-                        if (apiKey.isBlank()) {
-                            status = "Isi API key dulu"; statusGood = false; return@NeonButton
-                        }
-                        ctx.startForegroundService(Intent(ctx, OverlayService::class.java))
-                        status = "Overlay aktif. Balik ke app ujian."
-                        statusGood = true
+                NeonBtn("MULAI OVERLAY", ready) {
+                    if (!Settings.canDrawOverlays(ctx)) {
+                        status = "Izinkan overlay dulu"; statusGood = false; return@NeonBtn
                     }
-                )
-
-                Spacer(Modifier.height(4.dp))
-                StopButton {
-                    ctx.stopService(Intent(ctx, OverlayService::class.java))
-                    ctx.stopService(Intent(ctx, ScreenCaptureService::class.java))
-                    captureGranted = false
-                    status = "Overlay dihentikan"
+                    if (!captureGranted) {
+                        status = "Izinkan screen capture dulu"; statusGood = false; return@NeonBtn
+                    }
+                    if (apiKey.isBlank()) {
+                        status = "Isi API key dulu"; statusGood = false; return@NeonBtn
+                    }
+                    ctx.startForegroundService(Intent(ctx, OverlayService::class.java))
+                    status = "Overlay aktif. Balik ke app ujian."
                     statusGood = true
                 }
 
-                if (status.isNotBlank()) {
-                    Spacer(Modifier.height(6.dp))
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(
-                                if (statusGood) Ok.copy(alpha = 0.12f)
-                                else Bad.copy(alpha = 0.12f)
-                            )
-                            .border(
-                                1.dp,
-                                (if (statusGood) Ok else Bad).copy(alpha = 0.4f),
-                                RoundedCornerShape(10.dp)
-                            )
-                            .padding(12.dp)
-                    ) {
-                        Text(
-                            status,
-                            color = if (statusGood) Ok else Bad,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
+                StopBtn {
+                    ctx.stopService(Intent(ctx, OverlayService::class.java))
+                    ctx.stopService(Intent(ctx, ScreenCaptureService::class.java))
+                    captureGranted = false
+                    status = "Dihentikan"; statusGood = true
                 }
 
-                Spacer(Modifier.height(30.dp))
+                if (status.isNotBlank()) StatusBar(status, statusGood)
+
+                Spacer(Modifier.height(20.dp))
                 Text(
                     "v1.0 · xenmind · powered by xyrus router",
                     color = TxtDim.copy(alpha = 0.6f),
-                    fontSize = 10.sp,
-                    textAlign = TextAlign.Center,
+                    fontSize = 10.sp, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth()
                 )
-                Spacer(Modifier.height(20.dp))
+                Spacer(Modifier.height(30.dp))
             }
         }
     }
 
-    // ══════════════════════════════════════════════════
-    // COMPONENTS
-    // ══════════════════════════════════════════════════
+    @Composable fun CardTitle(t: String) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).background(Neon, CircleShape))
+            Spacer(Modifier.width(10.dp))
+            Text(t, color = Neon, fontSize = 11.sp,
+                fontWeight = FontWeight.Black, letterSpacing = 2.sp)
+        }
+    }
 
-    @Composable
-    fun GlassCard(content: @Composable ColumnScope.() -> Unit) {
-        Box(
+    @Composable fun GlassCard(content: @Composable ColumnScope.() -> Unit) {
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(18.dp))
                 .background(P3.copy(alpha = 0.7f))
                 .border(
                     1.dp,
-                    Brush.linearGradient(
-                        listOf(
-                            Violet.copy(alpha = 0.5f),
-                            Neon.copy(alpha = 0.15f)
-                        )
-                    ),
+                    Brush.linearGradient(listOf(
+                        Violet.copy(alpha = 0.5f),
+                        Neon.copy(alpha = 0.15f)
+                    )),
                     RoundedCornerShape(18.dp)
                 )
                 .padding(18.dp)
-        ) {
-            Column(content = content)
-        }
+        ) { content() }
     }
 
-    @Composable
-    fun LabeledField(
-        label: String,
-        value: String,
-        placeholder: String,
-        onValueChange: (String) -> Unit,
-        isSecret: Boolean
-    ) {
+    @Composable fun Field(label: String, value: String, ph: String, on: (String) -> Unit) {
         Column {
-            Text(
-                label,
-                color = TxtDim,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.5.sp,
-                modifier = Modifier.padding(bottom = 6.dp)
-            )
+            Text(label, color = TxtDim, fontSize = 10.sp,
+                fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
+                modifier = Modifier.padding(bottom = 6.dp))
             OutlinedTextField(
-                value = value,
-                onValueChange = onValueChange,
-                placeholder = { Text(placeholder, color = TxtDim.copy(alpha = 0.5f), fontSize = 13.sp) },
+                value = value, onValueChange = on,
+                placeholder = { Text(ph, color = TxtDim.copy(alpha = 0.5f), fontSize = 13.sp) },
                 singleLine = true,
-                textStyle = LocalTextStyle.current.copy(
-                    color = TxtLight, fontSize = 13.sp
-                ),
+                textStyle = LocalTextStyle.current.copy(color = TxtLight, fontSize = 13.sp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = Neon,
                     unfocusedBorderColor = Violet.copy(alpha = 0.35f),
@@ -364,30 +253,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable
-    fun PermissionRow(
-        label: String,
-        desc: String,
-        granted: Boolean,
-        onClick: () -> Unit
-    ) {
-        val bg by animateColorAsState(
-            if (granted) Ok.copy(alpha = 0.1f) else Violet.copy(alpha = 0.08f),
-            animationSpec = tween(300),
-            label = "permBg"
-        )
-        val border by animateColorAsState(
-            if (granted) Ok.copy(alpha = 0.4f) else Violet.copy(alpha = 0.3f),
-            animationSpec = tween(300),
-            label = "permBorder"
-        )
-
+    @Composable fun PermRow(label: String, desc: String, granted: Boolean, onClick: () -> Unit) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .background(bg)
-                .border(1.dp, border, RoundedCornerShape(12.dp))
+                .background(if (granted) Ok.copy(alpha = 0.1f) else Violet.copy(alpha = 0.08f))
+                .border(1.dp,
+                    if (granted) Ok.copy(alpha = 0.4f) else Violet.copy(alpha = 0.3f),
+                    RoundedCornerShape(12.dp))
                 .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -395,80 +269,53 @@ class MainActivity : ComponentActivity() {
                 modifier = Modifier
                     .size(34.dp)
                     .clip(CircleShape)
-                    .background(
-                        if (granted) Ok.copy(alpha = 0.2f)
-                        else Violet.copy(alpha = 0.15f)
-                    ),
+                    .background(if (granted) Ok.copy(alpha = 0.2f) else Violet.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    if (granted) "OK" else "-",
+                Text(if (granted) "OK" else "!",
                     color = if (granted) Ok else Violet,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Black
-                )
+                    fontSize = 12.sp, fontWeight = FontWeight.Black)
             }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(label, color = TxtLight, fontSize = 13.sp, fontWeight = FontWeight.Bold)
                 Text(desc, color = TxtDim, fontSize = 10.sp, lineHeight = 13.sp)
             }
-            if (!granted) {
+            if (granted) {
+                Text("AKTIF", color = Ok, fontSize = 11.sp,
+                    fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
+            } else {
                 TextButton(onClick = onClick) {
                     Text("IZIN", color = Neon, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                 }
-            } else {
-                Text(
-                    "AKTIF",
-                    color = Ok,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 1.5.sp
-                )
             }
         }
     }
 
-    @Composable
-    fun NeonButton(text: String, enabled: Boolean, onClick: () -> Unit) {
-        val bg = if (enabled) {
-            Brush.horizontalGradient(listOf(VioletDeep, Neon))
-        } else {
-            Brush.horizontalGradient(listOf(P3, P3))
-        }
-        val glow = if (enabled) Neon.copy(alpha = 0.5f) else Color.Transparent
-
+    @Composable fun NeonBtn(text: String, enabled: Boolean, onClick: () -> Unit) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(54.dp)
                 .shadow(if (enabled) 20.dp else 0.dp, RoundedCornerShape(14.dp))
                 .clip(RoundedCornerShape(14.dp))
-                .background(bg)
-                .border(
-                    1.dp,
+                .background(
+                    if (enabled) Brush.horizontalGradient(listOf(VioletDeep, Neon))
+                    else Brush.horizontalGradient(listOf(P3, P3))
+                )
+                .border(1.dp,
                     if (enabled) Neon.copy(alpha = 0.6f) else TxtDim.copy(alpha = 0.2f),
-                    RoundedCornerShape(14.dp)
-                )
+                    RoundedCornerShape(14.dp))
         ) {
-            TextButton(
-                onClick = onClick,
-                enabled = enabled,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                Text(
-                    text,
+            TextButton(onClick = onClick, enabled = enabled, modifier = Modifier.fillMaxSize()) {
+                Text(text,
                     color = if (enabled) TxtLight else TxtDim.copy(alpha = 0.5f),
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 2.sp
-                )
+                    fontSize = 14.sp, fontWeight = FontWeight.Black, letterSpacing = 2.sp)
             }
         }
     }
 
-    @Composable
-    fun StopButton(onClick: () -> Unit) {
+    @Composable fun StopBtn(onClick: () -> Unit) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -477,85 +324,71 @@ class MainActivity : ComponentActivity() {
                 .background(Bad.copy(alpha = 0.15f))
                 .border(1.dp, Bad.copy(alpha = 0.4f), RoundedCornerShape(12.dp))
         ) {
-            TextButton(
-                onClick = onClick,
-                modifier = Modifier.fillMaxSize()
-            ) {
+            TextButton(onClick = onClick, modifier = Modifier.fillMaxSize()) {
                 Text("STOP OVERLAY", color = Bad, fontSize = 13.sp,
                     fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
             }
         }
     }
 
-    @Composable
-    fun NeonDot() {
+    @Composable fun StatusBar(msg: String, good: Boolean) {
         Box(
             modifier = Modifier
-                .size(8.dp)
-                .shadow(8.dp, CircleShape)
-                .background(Neon, CircleShape)
-        )
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (good) Ok.copy(alpha = 0.12f) else Bad.copy(alpha = 0.12f))
+                .border(1.dp,
+                    (if (good) Ok else Bad).copy(alpha = 0.4f),
+                    RoundedCornerShape(10.dp))
+                .padding(12.dp)
+        ) {
+            Text(msg,
+                color = if (good) Ok else Bad,
+                fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        }
     }
 }
 
-// ══════════════════════════════════════════════════════
-// ROBOT LOGO (vector canvas)
-// ══════════════════════════════════════════════════════
 @Composable
-fun RobotMark(size: androidx.compose.ui.unit.Dp, glow: Boolean = true) {
+fun RobotMark(size: androidx.compose.ui.unit.Dp) {
     val infinite = rememberInfiniteTransition(label = "robot")
     val pulse by infinite.animateFloat(
-        initialValue = 0.85f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            tween(1400, easing = FastOutSlowInEasing),
-            RepeatMode.Reverse
-        ), label = "pulse"
+        initialValue = 0.9f, targetValue = 1.05f,
+        animationSpec = infiniteRepeatable(tween(1500), RepeatMode.Reverse),
+        label = "robotPulse"
     )
     Box(
         modifier = Modifier
             .size(size)
-            .shadow(if (glow) (18 * pulse).dp else 0.dp, CircleShape)
+            .shadow((16 * pulse).dp, CircleShape)
             .clip(CircleShape)
-            .background(
-                Brush.linearGradient(listOf(VioletDeep, Neon))
-            ),
-        contentAlignment = Alignment.Center
+            .background(Brush.linearGradient(listOf(VioletDeep, Neon)))
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        androidx.compose.foundation.Canvas(modifier = Modifier.fillMaxSize()) {
             val w = this.size.width
             val h = this.size.height
-            val stroke = w * 0.06f
+            val stroke = w * 0.055f
 
             // antenna
-            drawLine(
-                color = Color.White,
-                start = Offset(w * 0.5f, h * 0.12f),
-                end = Offset(w * 0.5f, h * 0.24f),
-                strokeWidth = stroke
-            )
-            drawCircle(
-                color = Color.White,
-                radius = w * 0.05f,
-                center = Offset(w * 0.5f, h * 0.1f)
-            )
+            drawLine(Color.White, Offset(w * 0.5f, h * 0.12f), Offset(w * 0.5f, h * 0.24f), stroke)
+            drawCircle(Color.White, w * 0.05f, Offset(w * 0.5f, h * 0.1f))
 
             // head
             drawRoundRect(
-                color = Color.White,
-                topLeft = Offset(w * 0.22f, h * 0.26f),
-                size = androidx.compose.ui.geometry.Size(w * 0.56f, h * 0.5f),
-                cornerRadius = androidx.compose.ui.geometry.CornerRadius(w * 0.12f)
+                Color.White,
+                Offset(w * 0.22f, h * 0.26f),
+                androidx.compose.ui.geometry.Size(w * 0.56f, h * 0.5f),
+                androidx.compose.ui.geometry.CornerRadius(w * 0.12f)
             )
+
             // eyes
             drawCircle(Color(0xFF0A0614), w * 0.06f, Offset(w * 0.37f, h * 0.48f))
             drawCircle(Color(0xFF0A0614), w * 0.06f, Offset(w * 0.63f, h * 0.48f))
+
             // mouth
-            drawLine(
-                color = Color(0xFF0A0614),
-                start = Offset(w * 0.4f, h * 0.62f),
-                end = Offset(w * 0.6f, h * 0.62f),
-                strokeWidth = stroke * 0.7f
-            )
+            drawLine(Color(0xFF0A0614),
+                Offset(w * 0.4f, h * 0.62f),
+                Offset(w * 0.6f, h * 0.62f), stroke * 0.7f)
         }
     }
 }

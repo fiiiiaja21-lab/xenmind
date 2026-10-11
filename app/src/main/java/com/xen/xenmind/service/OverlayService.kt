@@ -23,8 +23,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
@@ -141,93 +139,170 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
             setViewTreeLifecycleOwner(this@OverlayService)
             setViewTreeSavedStateRegistryOwner(this@OverlayService)
             setViewTreeViewModelStoreOwner(this@OverlayService)
-            setContent {
-                OverlayRoot(prefs = prefs, scope = scope)
-            }
+            setContent { Root(prefs, scope) }
         }
         wm.addView(composeView, params)
     }
 
     @Composable
-    private fun OverlayRoot(prefs: Prefs, scope: CoroutineScope) {
+    private fun Root(prefs: Prefs, scope: CoroutineScope) {
         var expanded by remember { mutableStateOf(false) }
-        var tab by remember { mutableStateOf(0) } // 0 = Jawab, 1 = Chat
         var status by remember { mutableStateOf("siap") }
         var statusGood by remember { mutableStateOf(true) }
-        var soal by remember { mutableStateOf("") }
-        var jawaban by remember { mutableStateOf("") }
-        var chatInput by remember { mutableStateOf("") }
-        var chatHistory by remember { mutableStateOf(listOf<Pair<String, String>>()) }
         var busy by remember { mutableStateOf(false) }
-
+        var output by remember { mutableStateOf("") }
+        var manualNum by remember { mutableStateOf("") }
+        var mode by remember { mutableStateOf(0) } // 0=auto, 1=manual
+        var autoLoop by remember { mutableStateOf(false) }
+        var progress by remember { mutableStateOf("") }
         val ctx = this@OverlayService
 
-        fun askAuto() {
-            val bmp = ScreenCaptureService.Shared.last
-            if (bmp == null) { status = "capture belum aktif"; statusGood = false; return }
-            if (ScreenUtils.isMostlyBlack(bmp)) { status = "layar FLAG_SECURE"; statusGood = false; return }
-            status = "baca soal..."; statusGood = true; busy = true
-            scope.launch {
-                try {
-                    val text = OcrReader.read(bmp)
-                    soal = text
-                    if (text.isBlank()) { status = "tidak ada teks"; statusGood = false; busy = false; return@launch }
-                    status = "kirim ke AI..."
-                    val client = XyrusClient(prefs.apiKey)
-                    val pair = client.askWithFallback(
-                        chain = prefs.modelChain,
-                        systemPrompt = client.systemPrompt(prefs.mode),
-                        userContent = text,
-                        retries = prefs.retryCount
-                    ) { attempt, model ->
-                        status = "coba $attempt · ${model.substringAfterLast('/')}"
-                    }
-                    jawaban = pair.first
-                    status = "via ${pair.second.substringAfterLast('/')}"
-                    statusGood = true
-                } catch (e: Exception) {
-                    status = "gagal: ${e.message?.take(80)}"
-                    statusGood = false
-                }
-                busy = false
-            }
+        fun say(s: String, ok: Boolean = true) { status = s; statusGood = ok }
+
+        suspend fun capture(): android.graphics.Bitmap? {
+            val bmp = ScreenCaptureService.Shared.last ?: return null
+            if (ScreenUtils.isMostlyBlack(bmp)) return null
+            return bmp
         }
 
-        fun sendChat() {
-            val msg = chatInput.trim()
-            if (msg.isBlank()) return
-            chatHistory = chatHistory + ("you" to msg)
-            chatInput = ""
+        suspend fun askAll(): String {
+            val bmp = capture() ?: throw RuntimeException("capture belum aktif")
+            val text = OcrReader.read(bmp)
+            if (text.isBlank() || text.length < 15) throw RuntimeException("soal tidak terdeteksi")
+            val client = XyrusClient(prefs.apiKey)
+            val pair = client.askWithFallback(
+                chain = prefs.modelChain,
+                systemPrompt = client.systemUniversal,
+                userContent = text,
+                retries = prefs.retryCount
+            ) { a, m -> say("coba $a · ${m.substringAfterLast('/')}") }
+            say("via ${pair.second.substringAfterLast('/')}")
+            return pair.first
+        }
+
+        suspend fun askSingle(num: String): String {
+            val bmp = capture() ?: throw RuntimeException("capture belum aktif")
+            val full = OcrReader.read(bmp)
+            if (full.isBlank()) throw RuntimeException("soal tidak terdeteksi")
+            val client = XyrusClient(prefs.apiKey)
+            val pair = client.askWithFallback(
+                chain = prefs.modelChain,
+                systemPrompt = client.systemSingle,
+                userContent = "Ini teks soal di layar. Cari dan jawab soal nomor $num saja.\n\n$full",
+                retries = prefs.retryCount
+            ) { a, m -> say("coba $a · ${m.substringAfterLast('/')}") }
+            say("via ${pair.second.substringAfterLast('/')}")
+            return pair.first
+        }
+
+        fun startAuto() {
+            if (autoLoop) return
+            autoLoop = true
             busy = true
-            status = "chat..."
+            output = ""
             scope.launch {
-                try {
-                    val client = XyrusClient(prefs.apiKey)
-                    val pair = client.askWithFallback(
-                        chain = prefs.modelChain,
-                        systemPrompt = "Kamu asisten ramah. Jawab singkat dan jelas dalam Bahasa Indonesia.",
-                        userContent = msg,
-                        retries = prefs.retryCount
-                    ) { attempt, model ->
-                        status = "coba $attempt · ${model.substringAfterLast('/')}"
+                var iter = 0
+                var lastFp = ""
+                var sameCount = 0
+                var emptyCount = 0
+
+                while (autoLoop && isActive) {
+                    iter++
+                    progress = "iterasi $iter"
+                    say("memproses #$iter...")
+                    try {
+                        val bmp = capture()
+                        if (bmp == null) {
+                            emptyCount++
+                            say("tidak bisa capture / FLAG_SECURE", false)
+                            if (emptyCount >= 3) { say("berhenti: capture gagal", false); break }
+                            delay(800); continue
+                        }
+                        val text = OcrReader.read(bmp)
+                        if (text.length < 15) {
+                            emptyCount++
+                            say("layar kosong / akhir", false)
+                            if (emptyCount >= 3) { say("selesai · semua soal habis", true); break }
+                            if (AutoScrollAccessibilityService.available()) {
+                                AutoScrollAccessibilityService.instance?.swipeUp()
+                            }
+                            delay(1200); continue
+                        }
+                        emptyCount = 0
+                        val fp = text.take(80)
+                        if (fp == lastFp) {
+                            sameCount++
+                            if (sameCount >= 2) {
+                                say("scroll mentok · selesai", true); break
+                            }
+                            if (AutoScrollAccessibilityService.available()) {
+                                AutoScrollAccessibilityService.instance?.swipeUp()
+                                delay(900)
+                                continue
+                            } else {
+                                say("scroll gak tersedia · stop", false); break
+                            }
+                        } else {
+                            sameCount = 0
+                            lastFp = fp
+                        }
+
+                        val client = XyrusClient(prefs.apiKey)
+                        val pair = client.askWithFallback(
+                            chain = prefs.modelChain,
+                            systemPrompt = client.systemUniversal,
+                            userContent = text,
+                            retries = prefs.retryCount
+                        ) { a, m -> say("coba $a · ${m.substringAfterLast('/')}") }
+
+                        output += "── LAYAR #$iter ──\n${pair.first}\n\n"
+                        say("via ${pair.second.substringAfterLast('/')}")
+
+                        if (AutoScrollAccessibilityService.available()) {
+                            delay(400)
+                            AutoScrollAccessibilityService.instance?.swipeUp()
+                            delay(1000)
+                        } else {
+                            say("scroll manual: swipe ke bawah", false)
+                            delay(3000)
+                        }
+                    } catch (e: Exception) {
+                        say("gagal: ${e.message?.take(60)}", false)
+                        delay(1500)
                     }
-                    chatHistory = chatHistory + ("ai" to pair.first)
-                    status = "via ${pair.second.substringAfterLast('/')}"
-                    statusGood = true
+                }
+                busy = false
+                autoLoop = false
+                progress = ""
+            }
+        }
+
+        fun stopAuto() {
+            autoLoop = false
+            say("dihentikan")
+        }
+
+        fun manualAsk() {
+            val num = manualNum.trim()
+            if (num.isBlank()) { say("ketik nomor soal", false); return }
+            busy = true
+            scope.launch {
+                say("cari soal no $num...")
+                try {
+                    val ans = askSingle(num)
+                    output = "── SOAL NO $num ──\n$ans\n\n" + output
+                    manualNum = ""
                 } catch (e: Exception) {
-                    chatHistory = chatHistory + ("ai" to "error: ${e.message?.take(80)}")
-                    status = "chat gagal"
-                    statusGood = false
+                    say("gagal: ${e.message?.take(60)}", false)
                 }
                 busy = false
             }
         }
 
-        fun doCopy(text: String) {
+        fun copyOut() {
             val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            cm.setPrimaryClip(ClipData.newPlainText("xenmind", text))
-            status = "tersalin"
-            statusGood = true
+            cm.setPrimaryClip(ClipData.newPlainText("xenmind", output))
+            say("tersalin ke clipboard")
         }
 
         Box(
@@ -240,102 +315,80 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
             }
         ) {
             if (!expanded) {
-                FloatingBubble(busy = busy) { expanded = true }
+                Bubble(busy) { expanded = true }
             } else {
-                PanelBody(
-                    tab = tab, onTab = { tab = it },
-                    status = status, statusGood = statusGood, busy = busy,
-                    soal = soal, jawaban = jawaban,
-                    chatHistory = chatHistory, chatInput = chatInput,
-                    onChatInput = { chatInput = it },
-                    onSend = { sendChat() },
-                    onAsk = { askAuto() },
-                    onCopy = { doCopy(if (tab == 0) jawaban else chatHistory.lastOrNull { it.first == "ai" }?.second ?: "") },
-                    onClear = {
-                        if (tab == 0) { soal = ""; jawaban = ""; status = "siap"; statusGood = true }
-                        else { chatHistory = emptyList(); status = "siap"; statusGood = true }
-                    },
+                Panel(
+                    mode = mode, onMode = { mode = it },
+                    status = status, good = statusGood, busy = busy,
+                    output = output, progress = progress,
+                    manualNum = manualNum, onManualNum = { manualNum = it },
+                    autoActive = autoLoop,
+                    onAuto = { if (autoLoop) stopAuto() else startAuto() },
+                    onManual = { manualAsk() },
+                    onCopy = { copyOut() },
+                    onClear = { output = ""; say("dibersihkan") },
                     onClose = { expanded = false }
                 )
             }
         }
     }
 
-    // ══════════════════════════════════════════
     @Composable
-    private fun FloatingBubble(busy: Boolean, onClick: () -> Unit) {
-        val infinite = rememberInfiniteTransition(label = "bubble")
-        val pulse by infinite.animateFloat(
-            initialValue = 0.9f, targetValue = 1.05f,
-            animationSpec = infiniteRepeatable(
-                tween(if (busy) 700 else 1400, easing = FastOutSlowInEasing),
-                RepeatMode.Reverse
-            ), label = "pulseBubble"
-        )
+    private fun Bubble(busy: Boolean, onClick: () -> Unit) {
+        val tr = rememberInfiniteTransition(label = "b")
+        val pulse by tr.animateFloat(0.9f, 1.06f,
+            infiniteRepeatable(tween(if (busy) 700 else 1500), RepeatMode.Reverse),
+            label = "bp")
         Box(
             modifier = Modifier
-                .size(64.dp)
+                .size(66.dp)
                 .shadow((22 * pulse).dp, CircleShape)
                 .clip(CircleShape)
                 .background(Brush.linearGradient(listOf(OV_VIOLET_DEEP, OV_NEON)))
                 .border(2.dp, Color.White.copy(alpha = 0.25f), CircleShape)
-                .pointerInput(Unit) {
-                    detectTapGestures { onClick() }
-                },
+                .pointerInput(Unit) { detectTapGestures { onClick() } },
             contentAlignment = Alignment.Center
         ) {
-            RobotMark(size = 44.dp, glow = false)
+            RobotMark(size = 44.dp)
         }
     }
 
     @Composable
-    private fun PanelBody(
-        tab: Int, onTab: (Int) -> Unit,
-        status: String, statusGood: Boolean, busy: Boolean,
-        soal: String, jawaban: String,
-        chatHistory: List<Pair<String, String>>, chatInput: String,
-        onChatInput: (String) -> Unit,
-        onSend: () -> Unit, onAsk: () -> Unit,
+    private fun Panel(
+        mode: Int, onMode: (Int) -> Unit,
+        status: String, good: Boolean, busy: Boolean,
+        output: String, progress: String,
+        manualNum: String, onManualNum: (String) -> Unit,
+        autoActive: Boolean,
+        onAuto: () -> Unit, onManual: () -> Unit,
         onCopy: () -> Unit, onClear: () -> Unit,
         onClose: () -> Unit
     ) {
         Column(
             modifier = Modifier
-                .width(340.dp)
+                .width(350.dp)
                 .clip(RoundedCornerShape(20.dp))
-                .background(
-                    Brush.verticalGradient(listOf(OV_BG, OV_SURF))
-                )
-                .border(
-                    1.dp,
+                .background(Brush.verticalGradient(listOf(OV_BG, OV_SURF)))
+                .border(1.dp,
                     Brush.linearGradient(listOf(OV_NEON.copy(alpha = 0.6f), OV_VIOLET.copy(alpha = 0.2f))),
-                    RoundedCornerShape(20.dp)
-                )
+                    RoundedCornerShape(20.dp))
                 .padding(14.dp)
         ) {
-            // header
             Row(verticalAlignment = Alignment.CenterVertically) {
-                RobotMark(size = 28.dp, glow = true)
+                RobotMark(size = 30.dp)
                 Spacer(Modifier.width(10.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("XENMIND", color = OV_NEON, fontSize = 12.sp,
+                Column(Modifier.weight(1f)) {
+                    Text("XENMIND", color = OV_NEON, fontSize = 13.sp,
                         fontWeight = FontWeight.Black, letterSpacing = 2.sp)
-                    Text("AI OVERLAY", color = OV_DIM, fontSize = 9.sp,
+                    Text("AUTO-SCROLL · UNIVERSAL", color = OV_DIM, fontSize = 8.sp,
                         fontWeight = FontWeight.Medium, letterSpacing = 1.5.sp)
                 }
-                Text(
-                    if (busy) "..." else "ok",
-                    color = if (busy) OV_NEON else OV_OK,
-                    fontSize = 10.sp, fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.width(10.dp))
                 TextButton(onClick = onClose) {
                     Text("[-]", color = OV_DIM, fontSize = 14.sp, fontWeight = FontWeight.Bold)
                 }
             }
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
 
-            // tabs
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -343,201 +396,120 @@ class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStat
                     .background(OV_BG.copy(alpha = 0.6f))
                     .padding(3.dp)
             ) {
-                TabBtn("JAWAB SOAL", tab == 0, Modifier.weight(1f)) { onTab(0) }
-                TabBtn("CHAT AI", tab == 1, Modifier.weight(1f)) { onTab(1) }
+                TabBtn("AUTO JAWAB", mode == 0, Modifier.weight(1f)) { onMode(0) }
+                TabBtn("MINTA JAWABAN", mode == 1, Modifier.weight(1f)) { onMode(1) }
             }
             Spacer(Modifier.height(10.dp))
 
-            // body
-            if (tab == 0) {
+            if (mode == 0) {
                 Column {
-                    NeonSmallBtn("AUTO JAWAB", OV_VIOLET, busy) { onAsk() }
+                    NeonBtn(if (autoActive) "STOP AUTO JAWAB" else "MULAI AUTO JAWAB",
+                        if (autoActive) OV_BAD else OV_VIOLET, busy) { onAuto() }
+                    if (progress.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(progress, color = OV_NEON, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    }
                     Spacer(Modifier.height(8.dp))
-                    if (soal.isNotBlank()) {
-                        SectionLabel("SOAL TERBACA")
-                        ScrollBox(90.dp, soal)
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    if (jawaban.isNotBlank()) {
-                        SectionLabel("JAWABAN")
-                        ScrollBox(160.dp, jawaban)
-                        Spacer(Modifier.height(8.dp))
-                    }
-                    Row {
-                        NeonSmallBtn("COPY", OV_VIOLET_DEEP, false, Modifier.weight(1f)) { onCopy() }
-                        Spacer(Modifier.width(6.dp))
-                        NeonSmallBtn("CLEAR", Color(0xFF2D1B4D), false, Modifier.weight(1f)) { onClear() }
-                    }
+                    Text("AI baca soal di layar, jawab, scroll sendiri sampai habis.",
+                        color = OV_DIM, fontSize = 10.sp, lineHeight = 14.sp)
                 }
             } else {
                 Column {
-                    if (chatHistory.isEmpty()) {
-                        Text(
-                            "Tes koneksi AI. Ketik pesan.",
-                            color = OV_DIM, fontSize = 11.sp, lineHeight = 15.sp
+                    Text("MASUKKAN NOMOR SOAL", color = OV_NEON, fontSize = 9.sp,
+                        fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
+                    Spacer(Modifier.height(6.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(OV_BG)
+                            .border(1.dp, OV_VIOLET.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                            .padding(horizontal = 12.dp, vertical = 12.dp)
+                    ) {
+                        if (manualNum.isEmpty()) {
+                            Text("contoh: 3", color = OV_DIM.copy(alpha = 0.5f), fontSize = 13.sp)
+                        }
+                        BasicTextField(
+                            value = manualNum, onValueChange = onManualNum,
+                            textStyle = TextStyle(color = OV_TEXT, fontSize = 13.sp),
+                            cursorBrush = SolidColor(OV_NEON),
+                            modifier = Modifier.fillMaxWidth()
                         )
-                    } else {
-                        ScrollBox(220.dp) {
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                chatHistory.forEach { (who, msg) ->
-                                    ChatBubble(who == "you", msg)
-                                }
-                            }
-                        }
                     }
-                    Spacer(Modifier.height(10.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(OV_BG)
-                                .border(1.dp, OV_VIOLET.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-                                .padding(horizontal = 10.dp, vertical = 8.dp)
-                        ) {
-                            if (chatInput.isEmpty()) {
-                                Text("ketik pesan...", color = OV_DIM.copy(alpha = 0.5f), fontSize = 12.sp)
-                            }
-                            BasicTextField(
-                                value = chatInput,
-                                onValueChange = onChatInput,
-                                textStyle = TextStyle(color = OV_TEXT, fontSize = 12.sp),
-                                cursorBrush = SolidColor(OV_NEON),
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(Brush.linearGradient(listOf(OV_VIOLET_DEEP, OV_NEON)))
-                                .pointerInput(Unit) { detectTapGestures { onSend() } },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(">", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Black)
-                        }
-                    }
+                    Spacer(Modifier.height(8.dp))
+                    NeonBtn("MINTA JAWABAN", OV_VIOLET, busy) { onManual() }
                 }
             }
 
             Spacer(Modifier.height(10.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
+
+            if (output.isNotBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("HASIL", color = OV_NEON, fontSize = 9.sp,
+                        fontWeight = FontWeight.Black, letterSpacing = 1.5.sp,
+                        modifier = Modifier.weight(1f))
+                    TextButton(onClick = onCopy) {
+                        Text("COPY", color = OV_NEON, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                    TextButton(onClick = onClear) {
+                        Text("CLEAR", color = OV_DIM, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
                 Box(
                     modifier = Modifier
-                        .size(6.dp)
-                        .background(if (statusGood) OV_OK else OV_BAD, CircleShape)
-                )
+                        .fillMaxWidth()
+                        .height(200.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(OV_BG.copy(alpha = 0.7f))
+                        .border(1.dp, OV_VIOLET.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
+                        .padding(10.dp)
+                ) {
+                    val sc = rememberScrollState()
+                    Column(modifier = Modifier.fillMaxSize().verticalScroll(sc)) {
+                        Text(output, color = OV_TEXT, fontSize = 11.sp, lineHeight = 16.sp)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(6.dp).background(if (good) OV_OK else OV_BAD, CircleShape))
                 Spacer(Modifier.width(6.dp))
-                Text(
-                    status,
-                    color = if (statusGood) OV_OK else OV_BAD,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                Text(status, color = if (good) OV_OK else OV_BAD,
+                    fontSize = 10.sp, fontWeight = FontWeight.Medium)
             }
         }
     }
 
     @Composable
-    private fun TabBtn(text: String, active: Boolean, mod: Modifier, onClick: () -> Unit) {
+    private fun TabBtn(t: String, a: Boolean, m: Modifier, onClick: () -> Unit) {
         Box(
-            modifier = mod
+            modifier = m
                 .clip(RoundedCornerShape(8.dp))
-                .background(if (active) OV_VIOLET_DEEP.copy(alpha = 0.4f) else Color.Transparent)
+                .background(if (a) OV_VIOLET_DEEP.copy(alpha = 0.4f) else Color.Transparent)
                 .pointerInput(Unit) { detectTapGestures { onClick() } }
                 .padding(vertical = 8.dp),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                text,
-                color = if (active) OV_TEXT else OV_DIM,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.sp
-            )
+            Text(t,
+                color = if (a) OV_TEXT else OV_DIM,
+                fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
         }
     }
 
     @Composable
-    private fun NeonSmallBtn(text: String, color: Color, busy: Boolean, mod: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit) {
+    private fun NeonBtn(t: String, c: Color, busy: Boolean, onClick: () -> Unit) {
         Box(
-            modifier = mod
-                .height(40.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(46.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(if (busy) color.copy(alpha = 0.4f) else color)
-                .pointerInput(Unit) {
-                    detectTapGestures { if (!busy) onClick() }
-                },
+                .background(if (busy) c.copy(alpha = 0.4f) else c)
+                .pointerInput(Unit) { detectTapGestures { if (!busy) onClick() } },
             contentAlignment = Alignment.Center
         ) {
-            Text(text, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
-        }
-    }
-
-    @Composable
-    private fun SectionLabel(t: String) {
-        Text(t, color = OV_NEON, fontSize = 9.sp, fontWeight = FontWeight.Black,
-            letterSpacing = 1.5.sp, modifier = Modifier.padding(bottom = 4.dp))
-    }
-
-    @Composable
-    private fun ScrollBox(height: androidx.compose.ui.unit.Dp, content: String) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(height)
-                .clip(RoundedCornerShape(10.dp))
-                .background(OV_BG.copy(alpha = 0.7f))
-                .border(1.dp, OV_VIOLET.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
-                .padding(10.dp)
-        ) {
-            Text(content, color = OV_TEXT, fontSize = 11.sp, lineHeight = 16.sp)
-        }
-    }
-
-    @Composable
-    private fun ScrollBox(height: androidx.compose.ui.unit.Dp, content: @Composable () -> Unit) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(height)
-                .clip(RoundedCornerShape(10.dp))
-                .background(OV_BG.copy(alpha = 0.7f))
-                .border(1.dp, OV_VIOLET.copy(alpha = 0.2f), RoundedCornerShape(10.dp))
-                .padding(8.dp)
-        ) {
-            val scroll = rememberScrollState()
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(scroll)
-            ) {
-                content()
-            }
-        }
-    }
-
-    @Composable
-    private fun ChatBubble(mine: Boolean, msg: String) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start
-        ) {
-            Box(
-                modifier = Modifier
-                    .widthIn(max = 230.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (mine) OV_VIOLET_DEEP.copy(alpha = 0.6f) else OV_BG)
-                    .border(
-                        1.dp,
-                        if (mine) OV_NEON.copy(alpha = 0.4f) else OV_VIOLET.copy(alpha = 0.2f),
-                        RoundedCornerShape(12.dp)
-                    )
-                    .padding(10.dp)
-            ) {
-                Text(msg, color = OV_TEXT, fontSize = 11.sp, lineHeight = 15.sp)
-            }
+            Text(t, color = Color.White, fontSize = 12.sp,
+                fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
         }
     }
 

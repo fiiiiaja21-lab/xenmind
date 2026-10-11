@@ -15,12 +15,11 @@ object OcrReader {
         val img = InputImage.fromBitmap(bitmap, 0)
         recognizer.process(img)
             .addOnSuccessListener { txt ->
-                val cleaned = txt.textBlocks
-                    .flatMap { it.lines }
-                    .map { it.text.trim() }
-                    .filter { it.length >= 3 }
-                    .joinToString("\n")
-                cont.resume(cleaned)
+                val sb = StringBuilder()
+                for (block in txt.textBlocks) for (line in block.lines) {
+                    sb.append(line.text).append("\n")
+                }
+                cont.resume(sb.toString())
             }
             .addOnFailureListener { cont.resumeWithException(it) }
     }

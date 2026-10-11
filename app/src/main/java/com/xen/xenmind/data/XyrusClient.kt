@@ -67,9 +67,22 @@ class XyrusClient(private val apiKey: String) {
         throw lastErr ?: RuntimeException("no models available")
     }
 
-    fun systemPrompt(mode: String): String = when (mode) {
-        "jawab_saja" -> "Kamu asisten ujian. Jawab soal dengan jawaban paling tepat saja. Format: [Jawaban]. Tanpa penjelasan."
-        "expert" -> "Kamu berperan sebagai Albert Einstein. Jawab soal ujian dengan benar dan tajam.\nFormat:\nJAWABAN: <jawaban>\nALASAN: <1-3 baris>"
-        else -> "Kamu asisten ujian. Jawab soal dengan jawaban tepat + penjelasan singkat.\nFormat:\nJAWABAN: <jawaban>\nPENJELASAN: <1-3 baris>"
-    }
+    val systemUniversal: String = """
+        Kamu asisten ujian. Jawab soal apapun yang ada di layar — pilihan ganda atau essay — dengan tepat dan lengkap.
+
+        Aturan:
+        1. Untuk SOAL PILIHAN GANDA, balas:
+           [NO <nomor>] JAWABAN: <huruf>. <teks pilihan>
+        2. Untuk SOAL ESSAY, balas:
+           [NO <nomor>] JAWABAN: <jawaban lengkap, 1-3 paragraf sesuai bobot soal>
+        3. Kalau ada beberapa soal dalam satu pesan, jawab SEMUA dengan format di atas, satu per baris.
+        4. Kalau soal tidak ber-nomor, jawab secara berurutan sesuai urutan yang muncul.
+        5. Bahasa Indonesia. Tanpa basa-basi. Langsung ke jawaban.
+    """.trimIndent()
+
+    val systemSingle: String = """
+        Kamu asisten ujian. Jawab soal berikut dengan tepat dan lengkap.
+        Format:
+        JAWABAN: <jawaban>
+    """.trimIndent()
 }

@@ -3,4 +3,6 @@
     <string name="notif_channel_name">XenMind Overlay</string>
     <string name="notif_title">XenMind aktif</string>
     <string name="notif_text">Overlay siap. Tap untuk buka.</string>
+    <string name="accessibility_label">XenMind Auto-Scroll</string>
+    <string name="accessibility_desc">Izinkan XenMind scroll otomatis.</string>
 </resources>

@@ -15,7 +15,8 @@ object OcrReader {
         val img = InputImage.fromBitmap(bitmap, 0)
         recognizer.process(img)
             .addOnSuccessListener { txt ->
-                val cleaned = txt.textLines
+                val cleaned = txt.textBlocks
+                    .flatMap { it.lines }
                     .map { it.text.trim() }
                     .filter { it.length >= 3 }
                     .joinToString("\n")

@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -84,12 +85,15 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxWidth())
                 OutlinedTextField(
                     value = chainText,
-                    onValueChange = { chainText = it; prefs.modelChain = it.split(",").map { s -> s.trim() }.filter { s -> s.isNotEmpty() } },
+                    onValueChange = {
+                        chainText = it
+                        prefs.modelChain = it.split(",").map { s -> s.trim() }.filter { s -> s.isNotEmpty() }
+                    },
                     label = { Text("Model chain (koma)") },
                     modifier = Modifier.fillMaxWidth())
 
                 Head("2. Permission")
-                OutBtn(if (hasOverlay) "Overlay: ✓" else "Izinkan Overlay") {
+                OutBtn(if (hasOverlay) "Overlay: ok" else "Izinkan Overlay") {
                     overlayPerm.launch(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                         Uri.parse("package:${ctx.packageName}")))
                 }

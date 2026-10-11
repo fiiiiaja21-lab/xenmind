@@ -10,15 +10,10 @@ import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
 import android.view.Gravity
-import android.view.MotionEvent
-import android.view.View
 import android.view.WindowManager
-import android.widget.FrameLayout
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.TextView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -35,20 +30,27 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.*
+import androidx.core.app.NotificationCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import com.xen.xenmind.App
 import com.xen.xenmind.R
 import com.xen.xenmind.data.Prefs
 import com.xen.xenmind.data.XyrusClient
 import com.xen.xenmind.ocr.OcrReader
 import com.xen.xenmind.util.ScreenUtils
-import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
 
-class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
+class OverlayService : Service(), LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
 
     private lateinit var wm: WindowManager
     private lateinit var composeView: ComposeView
@@ -58,7 +60,10 @@ class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
 
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val savedStateController = SavedStateRegistryController.create(this)
+    private val store = ViewModelStore()
+
     override val lifecycle: Lifecycle get() = lifecycleRegistry
+    override val viewModelStore: ViewModelStore get() = store
     override val savedStateRegistry: SavedStateRegistry get() = savedStateController.savedStateRegistry
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -108,6 +113,7 @@ class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         composeView = ComposeView(this).apply {
             setViewTreeLifecycleOwner(this@OverlayService)
             setViewTreeSavedStateRegistryOwner(this@OverlayService)
+            setViewTreeViewModelStoreOwner(this@OverlayService)
             setContent {
                 OverlayRoot(prefs = prefs, scope = scope)
             }
@@ -118,7 +124,6 @@ class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
     @Composable
     private fun OverlayRoot(prefs: Prefs, scope: CoroutineScope) {
         var expanded by remember { mutableStateOf(false) }
-        var thinking by remember { mutableStateOf(false) }
         var status by remember { mutableStateOf("siap") }
         var soal by remember { mutableStateOf("") }
         var jawaban by remember { mutableStateOf("") }
@@ -128,16 +133,16 @@ class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         fun doAsk() {
             val bmp = ScreenCaptureService.Shared.last
             if (bmp == null) { status = "capture belum aktif"; return }
-            if (ScreenUtils.isMostlyBlack(bmp)) { status = "layar FLAG_SECURE / hitam"; return }
-            thinking = true; status = "baca soal..."
+            if (ScreenUtils.isMostlyBlack(bmp)) { status = "layar FLAG_SECURE"; return }
+            status = "baca soal..."
             scope.launch {
                 try {
                     val text = OcrReader.read(bmp)
                     soal = text
-                    if (text.isBlank()) { status = "tidak ada teks"; thinking = false; return@launch }
+                    if (text.isBlank()) { status = "tidak ada teks"; return@launch }
                     status = "kirim ke AI..."
                     val client = XyrusClient(prefs.apiKey)
-                    val (ans, used) = client.askWithFallback(
+                    val pair = client.askWithFallback(
                         chain = prefs.modelChain,
                         systemPrompt = client.systemPrompt(prefs.mode),
                         userContent = text,
@@ -145,11 +150,11 @@ class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
                     ) { attempt, model ->
                         status = "coba $attempt · ${model.substringAfterLast('/')}"
                     }
-                    jawaban = ans
-                    status = "via ${used.substringAfterLast('/')}"
+                    jawaban = pair.first
+                    status = "via ${pair.second.substringAfterLast('/')}"
                 } catch (e: Exception) {
                     status = "gagal: ${e.message?.take(80)}"
-                } finally { thinking = false }
+                }
             }
         }
 
@@ -160,30 +165,26 @@ class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
         }
 
         Box(
-            modifier = Modifier
-                .pointerInput(Unit) {
-                    detectDragGestures { _, drag ->
-                        params.x = (params.x + drag.x.toInt()).coerceAtLeast(0)
-                        params.y = (params.y + drag.y.toInt()).coerceAtLeast(0)
-                        wm.updateViewLayout(composeView, params)
-                    }
+            modifier = Modifier.pointerInput(Unit) {
+                detectDragGestures { _, drag ->
+                    params.x = (params.x + drag.x.toInt()).coerceAtLeast(0)
+                    params.y = (params.y + drag.y.toInt()).coerceAtLeast(0)
+                    wm.updateViewLayout(composeView, params)
                 }
+            }
         ) {
             if (!expanded) {
                 Box(
                     modifier = Modifier
                         .size(60.dp)
                         .shadow(12.dp, CircleShape)
-                        .background(Color(0xFFA855F7), CircleShape),
+                        .background(Color(0xFFA855F7), CircleShape)
+                        .pointerInput(Unit) {
+                            detectTapGestures { expanded = true }
+                        },
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        "🤖",
-                        fontSize = 26.sp,
-                        modifier = Modifier.pointerInput(Unit) {
-                            detectTapGestures { expanded = true }
-                        }
-                    )
+                    Text("X", fontSize = 24.sp, color = Color.White, fontWeight = FontWeight.Bold)
                 }
             } else {
                 Column(
@@ -193,16 +194,13 @@ class OverlayService : Service(), LifecycleOwner, SavedStateRegistryOwner {
                         .padding(12.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("🤖 XenMind", color = Color(0xFFD946EF),
+                        Text("XenMind", color = Color(0xFFD946EF),
                             fontWeight = FontWeight.Bold, fontSize = 14.sp,
                             modifier = Modifier.weight(1f))
-                        Text(
-                            "▼",
-                            color = Color(0xFFA08CC8),
+                        Text("[-]", color = Color(0xFFA08CC8),
                             modifier = Modifier.pointerInput(Unit) {
                                 detectTapGestures { expanded = false }
-                            }
-                        )
+                            })
                     }
                     Spacer(Modifier.height(8.dp))
                     Btn("Auto Jawab", Color(0xFFA855F7)) { doAsk() }

@@ -1,0 +1,3 @@
+-keep class com.xen.xenmind.** { *; }
+-keepattributes *Annotation*, InnerClasses
+-dontnote kotlinx.serialization.**

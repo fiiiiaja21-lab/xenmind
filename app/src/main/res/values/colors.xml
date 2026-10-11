@@ -1,0 +1,10 @@
+<resources>
+    <color name="bg">#0F0819</color>
+    <color name="bg2">#190C2A</color>
+    <color name="accent">#A855F7</color>
+    <color name="accent_glow">#D946EF</color>
+    <color name="text">#F0E6FF</color>
+    <color name="text_dim">#A08CC8</color>
+    <color name="danger">#FF5078</color>
+    <color name="success">#50FFA0</color>
+</resources>
